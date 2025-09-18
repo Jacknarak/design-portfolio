@@ -4,10 +4,10 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Surface Design Portfolio</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=13">
   <meta name="description" content="Contemporary, production-ready surface designs for apparel, home, and stationery."/>
 </head>
-<body>
+<body class="no-select">
   <header class="site-header">
     <div class="wrap">
       <h1>Surface Design Portfolio</h1>
@@ -24,51 +24,55 @@
     <section id="work">
       <h2>Selected Work</h2>
 
-      <!-- กริดอัตโนมัติ: ตั้ง owner/repo/branch ให้ตรงกับของคุณ -->
+      <!-- ตั้งค่าแหล่งข้อมูล/โหมด -->
       <div id="grid" class="grid"
            data-owner="Jacknarak"
            data-repo="design-portfolio"
-           data-branch="main"></div>
+           data-branch="main"
+           data-path="docs/assets"
+           data-watermark="© Jacknarak — Preview Only"
+           data-downloads="hide"></div>
 
       <noscript>
         <p style="color:#b00">This gallery needs JavaScript enabled.</p>
       </noscript>
     </section>
 
-  <section id="about">
-  <h2>About</h2>
-  <p>
-    I’m an emerging surface designer creating contemporary, market-ready prints for apparel, home, and stationery.
-    My work focuses on florals, botanicals, soft geometrics, and textured abstracts—built as clean,
-    production-ready repeats with balanced scale and refined color stories. I design with usability in mind:
-    cohesive collections, clear organization, and optional alternative colorways. My goal is to keep learning,
-    build a sustainable creative practice, and feel proud when my artwork lives on real products.
-    I’m open to licensing, collaborations, and custom briefs.
-  </p>
-</section>
+    <section id="about">
+      <h2>About</h2>
+      <p>
+        I’m an emerging surface designer creating contemporary, market-ready prints for apparel, home, and stationery.
+        My work focuses on florals, botanicals, soft geometrics, and textured abstracts—built as clean,
+        production-ready repeats with balanced scale and refined color stories. I design with usability in mind:
+        cohesive collections, clear organization, and optional alternative colorways. My goal is to keep learning,
+        build a sustainable creative practice, and feel proud when my artwork lives on real products.
+        I’m open to licensing, collaborations, and custom briefs.
+      </p>
+    </section>
 
     <section id="contact">
-  <h2>Contact</h2>
-  <p>
-    For licensing, commissions, or collaborations, please email
-    <a href="mailto:inkchaniai@gmail.com">inkchaniai@gmail.com</a>.
-    I respond as quickly as possible and can share layered source files and additional colorways upon request.
-  </p>
-</section>
-
+      <h2>Contact</h2>
+      <p>
+        For licensing, commissions, or collaborations, please email
+        <a href="mailto:inkchaniai@gmail.com">inkchaniai@gmail.com</a>.
+        I respond as quickly as possible and can share layered source files and additional colorways upon request.
+      </p>
+    </section>
   </main>
 
   <footer class="site-footer">
     <div class="wrap"><small>© 2025 Surface Design Portfolio.</small></div>
   </footer>
 
-<script>
-  // ปิดคลิกขวาและลากรูปออก
-  document.addEventListener('contextmenu', e => e.preventDefault());
-  document.addEventListener('dragstart', e => e.preventDefault());
-</script>
-  
-  <!-- สคริปต์แกลเลอรี่อัตโนมัติ -->
-  <script src="gallery.js?v=12" defer></script>
+  <!-- Lightbox viewer -->
+  <div id="viewer" class="viewer" aria-hidden="true">
+    <div class="viewer-content">
+      <img id="viewer-img" alt="Preview" draggable="false"/>
+      <div class="wm wm-large"></div>
+      <button id="viewer-close" class="viewer-close" aria-label="Close preview">×</button>
+    </div>
+  </div>
+
+  <script src="gallery.js?v=13" defer></script>
 </body>
 </html>
