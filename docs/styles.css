@@ -19,7 +19,7 @@ h2{font-size:22px;margin:28px 0 14px}
 
 .card{background:#fff;border:1px solid #ececec;border-radius:12px;overflow:hidden;
       box-shadow:0 4px 16px rgba(0,0,0,.04)}
-.card .thumb{position:relative;background:#eee}
+.card .thumb{position:relative;background:#eee;cursor:zoom-in}
 .card .thumb img{display:block;width:100%;height:auto;aspect-ratio:4/3;object-fit:cover}
 .card .thumb .wm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   pointer-events:none;opacity:.18;font-weight:800;letter-spacing:2px;font-size:26px;transform:rotate(-18deg);text-align:center;
@@ -43,9 +43,27 @@ h2{font-size:22px;margin:28px 0 14px}
   background:#fff;color:#111;font-size:24px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.3)}
 .viewer-close:hover{background:#f1f1f1}
 
+/* Toast */
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);
+  background:#111;color:#fff;padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,.3);
+  opacity:0;pointer-events:none;transition:opacity .25s ease;z-index:1100;max-width:90vw;text-align:center}
+.toast.show{opacity:1}
+
 /* Footer */
 .site-footer{margin-top:40px;padding:22px 0;border-top:1px solid #ececec;background:#f7f7f7;color:#555}
 
 /* Protection helpers */
 .no-select, .no-select *{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 img{pointer-events:none;-webkit-user-drag:none}
+
+/* --- PRINT PROTECTION --- */
+@media print {
+  body * { display: none !important; }
+  body::before {
+    content: "Printing disabled — previews only";
+    display: block !important;
+    margin: 40vh auto 0;
+    text-align: center;
+    font: 700 22px/1.4 Arial, Helvetica, sans-serif;
+  }
+}
