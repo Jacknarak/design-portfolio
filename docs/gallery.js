@@ -1,18 +1,18 @@
-// gallery.js — Auto gallery with categories + pagination + lightbox + protection
-// - แบ่งหน้า: page size จาก data-page-size (ดีฟอลต์ 20)
-// - หมวดหมู่: สร้างจากแท็กใน .meta.json + จัดเข้ากลุ่มอัตโนมัติ (ขยายได้ในอนาคต)
-// - คงไว้: ลายน้ำ, lightbox, hide downloads (หรือเปลี่ยน data-downloads="show")
+// gallery.js — Categories from meta.category/categories + pagination + protection + lightbox
+// - ใช้ meta.category เป็น "แหล่งความจริง" (ถ้าไม่มีก็ใช้ meta.categories[0])
+// - ถ้าไม่พบทั้งคู่ -> เดาจากแท็ก/ชื่อเรื่องเป็น 'Uncategorized' (ให้ของเก่ายังแสดงได้)
+// - สร้างปุ่มหมวดจากข้อมูลจริง (เพิ่มหมวดในอนาคตโดยแก้ .meta.json ได้เลย)
 
 (async () => {
-  const grid   = document.getElementById('grid');
-  const filters= document.getElementById('filters');
-  const pager  = document.getElementById('pager');
+  const grid    = document.getElementById('grid');
+  const filters = document.getElementById('filters');
+  const pager   = document.getElementById('pager');
   if (!grid) return;
 
   // --- config ---
-  const OWNER  = grid.dataset.owner  || 'Jacknarak';
-  const REPO   = grid.dataset.repo   || 'design-portfolio';
-  const BRANCH = grid.dataset.branch || 'main';
+  const OWNER   = grid.dataset.owner  || 'Jacknarak';
+  const REPO    = grid.dataset.repo   || 'design-portfolio';
+  const BRANCH  = grid.dataset.branch || 'main';
   const WM_TEXT = grid.dataset.watermark || '© Preview Only';
   const SHOW_DOWNLOADS = (grid.dataset.downloads || 'hide').toLowerCase() === 'show';
   const PAGE_SIZE = Math.max(1, parseInt(grid.dataset.pageSize || '20', 10));
@@ -21,11 +21,12 @@
   if (grid.dataset.path) candidatePaths.push(grid.dataset.path);
   candidatePaths.push('docs/assets','assets');
 
+  const qs = new URLSearchParams(location.search);
+
   // --- utils ---
   const TYPE_RE = /-(thumb|full|pack|ai|eps|psd|svg|png|jpg|jpeg|pdf|zip)\.(ai|eps|psd|svg|png|jpg|jpeg|pdf|zip)$/i;
   const LABELS  = { pack:'Pack', ai:'AI', eps:'EPS', psd:'PSD', svg:'SVG', png:'PNG', jpg:'JPG', jpeg:'JPG', pdf:'PDF', zip:'ZIP' };
   const titleCase = s => s.replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim().replace(/\w\S*/g, t => t[0].toUpperCase()+t.slice(1));
-  const qs = new URLSearchParams(location.search);
 
   async function fetchJSON(url) {
     try {
@@ -71,7 +72,7 @@
     return;
   }
 
-  // Group by slug
+  // Group by slug (collect files)
   const groupsMap = {};
   for (const f of list) {
     const m = f.name.match(TYPE_RE);
@@ -83,58 +84,65 @@
   }
   const allItems = Object.values(groupsMap).filter(g => g.files.thumb && g.files.full);
 
-  // Load meta
+  // Load meta & derive category
   for (const g of allItems) {
     const metaURL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${ASSETS_PATH}/${g.slug}.meta.json`;
     g.meta = await fetchJSON(metaURL) || {};
     g.title = g.meta.title || titleCase(g.slug);
     g.desc  = g.meta.description || 'Production-ready seamless print with balanced scale and refined color.';
     g.tags  = Array.isArray(g.meta.tags) ? g.meta.tags.map(s=>s.toLowerCase()) : [];
+
+    // Category priority: meta.category > meta.categories[0] > fallback
+    let category = (g.meta.category || '').toString().trim();
+    if (!category && Array.isArray(g.meta.categories) && g.meta.categories.length) {
+      category = (g.meta.categories[0] || '').toString().trim();
+    }
+    if (!category) {
+      // Fallback (เดาแบบอ่อน) เพื่อให้ของเก่ายังแสดงและกรองได้
+      const title = g.title.toLowerCase();
+      const t = new Set(g.tags);
+      const matchAny = arr => arr.some(k => t.has(k) || title.includes(k));
+      if (matchAny(['floral','botanical','flower','leaf','foliage'])) category = 'Floral';
+      else if (matchAny(['geo','geometric','pattern','stripe','check','dot'])) category = 'Geometric';
+      else if (matchAny(['animal','leopard','tiger','zebra','bird','butterfly'])) category = 'Animal';
+      else if (matchAny(['nature','forest','mountain','ocean','stone','wood'])) category = 'Nature';
+      else if (matchAny(['textile','fabric','weave','ikat','batik','paisley'])) category = 'Textile';
+      else if (matchAny(['abstract','texture','brush','paint'])) category = 'Abstract';
+      else category = 'Uncategorized';
+    }
+    g.category = category;
   }
 
-  // Categorize
-  function categorize(item){
-    const t = new Set(item.tags);
-    const title = item.title.toLowerCase();
-
-    const matchAny = (arr) => arr.some(k => t.has(k) || title.includes(k));
-
-    if (matchAny(['floral','botanical','flower','foliage','leaf','garden'])) return 'Floral';
-    if (matchAny(['geo','geometric','pattern','stripe','check','plaid','dot','polka'])) return 'Geometric';
-    if (matchAny(['animal','leopard','tiger','zebra','wildlife','bird','butterfly'])) return 'Animal';
-    if (matchAny(['nature','landscape','forest','mountain','ocean','sea','stone','wood'])) return 'Nature';
-    if (matchAny(['textile','fabric','weave','ikat','batik','paisley'])) return 'Textile';
-    return 'Uncategorized';
-  }
-  allItems.forEach(i => i.category = categorize(i));
-
-  // Build category list (sorted, 'All' first)
-  const categories = Array.from(new Set(allItems.map(i => i.category))).sort();
-  const catParam = qs.get('cat') || 'All';
-  let currentCategory = categories.includes(catParam) ? catParam : 'All';
+  // Build category list from data
+  const categoriesSet = new Set(allItems.map(i => i.category));
+  const categories = Array.from(categoriesSet).sort((a,b)=>a.localeCompare(b));
+  let currentCategory = qs.get('cat') || 'All';
+  if (currentCategory !== 'All' && !categoriesSet.has(currentCategory)) currentCategory = 'All';
 
   // Render filter chips
   if (filters) {
     const chips = [];
-    const makeChip = (name) => {
+    const addChip = (name) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'filter-chip' + (name===currentCategory ? ' active':'');
       btn.textContent = name;
       btn.addEventListener('click', () => {
         currentCategory = name;
-        // reset to page 1 on category change
         qs.set('cat', name==='All' ? '' : name);
-        qs.set('page','1');
+        qs.set('page','1'); // reset page
         history.replaceState({}, '', location.pathname + '?' + qs.toString());
         render();
       });
-      return btn;
+      filters.appendChild(btn);
     };
     filters.innerHTML = '';
-    filters.appendChild(Object.assign(document.createElement('span'), {className:'label', textContent:'Category:'}));
-    filters.appendChild(makeChip('All'));
-    for (const c of categories) filters.appendChild(makeChip(c));
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = 'Category:';
+    filters.appendChild(label);
+    addChip('All');
+    for (const c of categories) addChip(c);
   }
 
   // Viewer
@@ -156,7 +164,7 @@
       ? allItems
       : allItems.filter(i => i.category === currentCategory);
 
-    // sort newest-first by slug name
+    // sort newest-first by slug
     filtered.sort((a,b)=> a.slug < b.slug ? 1 : -1);
 
     // pagination
