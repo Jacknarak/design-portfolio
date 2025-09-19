@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Surface Design Portfolio</title>
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
   <meta name="description" content="Contemporary, production-ready surface designs for apparel, home, and stationery."/>
 </head>
 <body class="no-select">
@@ -24,10 +24,8 @@
     <section id="work">
       <h2>Selected Work</h2>
 
-      <!-- แผงตัวกรองหมวด (เติมอัตโนมัติจากเมตา) -->
-      <div id="filters" class="filters">
-        <!-- จะถูกเติมปุ่ม: All, Floral, Geometric, Animal, Nature, Textile, ... -->
-      </div>
+      <!-- แผงตัวกรองหมวด (จะถูกเติมอัตโนมัติจาก meta.category / meta.categories) -->
+      <div id="filters" class="filters"></div>
 
       <!-- กริดผลงาน -->
       <div id="grid" class="grid"
@@ -40,9 +38,7 @@
            data-page-size="20"></div>
 
       <!-- ตัวแบ่งหน้า -->
-      <nav id="pager" class="pager" aria-label="Pagination">
-        <!-- จะถูกเติม Prev · 1 2 3 · Next -->
-      </nav>
+      <nav id="pager" class="pager" aria-label="Pagination"></nav>
 
       <noscript>
         <p style="color:#b00">This gallery needs JavaScript enabled.</p>
@@ -87,6 +83,6 @@
   <!-- Toast message -->
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="gallery.js?v=20" defer></script>
+  <script src="gallery.js?v=21" defer></script>
 </body>
 </html>
