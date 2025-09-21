@@ -1,12 +1,11 @@
-// gallery.js — Categories from meta.category/categories + pagination + protection + lightbox
-// - ใช้ meta.category เป็น "แหล่งความจริง" (ถ้าไม่มีก็ใช้ meta.categories[0])
-// - ถ้าไม่พบทั้งคู่ -> เดาจากแท็ก/ชื่อเรื่องเป็น 'Uncategorized' (ให้ของเก่ายังแสดงได้)
-// - สร้างปุ่มหมวดจากข้อมูลจริง (เพิ่มหมวดในอนาคตโดยแก้ .meta.json ได้เลย)
-
+// gallery.js — robust parsing (+ space/_/-), categories from meta, pagination, lightbox, debug
 (async () => {
   const grid    = document.getElementById('grid');
   const filters = document.getElementById('filters');
   const pager   = document.getElementById('pager');
+  const qs      = new URLSearchParams(location.search);
+  const isDebug = qs.has('debug');
+  const dbgBox  = document.getElementById('debug');
   if (!grid) return;
 
   // --- config ---
@@ -21,12 +20,19 @@
   if (grid.dataset.path) candidatePaths.push(grid.dataset.path);
   candidatePaths.push('docs/assets','assets');
 
-  const qs = new URLSearchParams(location.search);
-
   // --- utils ---
-  const TYPE_RE = /-(thumb|full|pack|ai|eps|psd|svg|png|jpg|jpeg|pdf|zip)\.(ai|eps|psd|svg|png|jpg|jpeg|pdf|zip)$/i;
-  const LABELS  = { pack:'Pack', ai:'AI', eps:'EPS', psd:'PSD', svg:'SVG', png:'PNG', jpg:'JPG', jpeg:'JPG', pdf:'PDF', zip:'ZIP' };
+  // allow '-', '_' or space before type; support more extensions; case-insensitive
+  const TYPE_RE = /[ _-](thumb|full|pack|ai|eps|psd|svg|png|jpg|jpeg|pdf|zip|webp)\.(ai|eps|psd|svg|png|jpg|jpeg|pdf|zip|webp)$/i;
+  const LABELS  = { pack:'Pack', ai:'AI', eps:'EPS', psd:'PSD', svg:'SVG', png:'PNG', jpg:'JPG', jpeg:'JPG', pdf:'PDF', zip:'ZIP', webp:'WEBP' };
   const titleCase = s => s.replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim().replace(/\w\S*/g, t => t[0].toUpperCase()+t.slice(1));
+
+  function dbg(...args){
+    if (isDebug) {
+      if (dbgBox && dbgBox.hasAttribute('hidden')) dbgBox.removeAttribute('hidden');
+      if (dbgBox) dbgBox.innerHTML += `<div>${args.map(a => typeof a==='string'?a:JSON.stringify(a)).join(' ')}</div>`;
+      console.log('[DEBUG]', ...args);
+    }
+  }
 
   async function fetchJSON(url) {
     try {
@@ -36,27 +42,21 @@
     } catch { return null; }
   }
 
-  // Toast
+  // Soft protection
   const toast = document.getElementById('toast');
   function showToast(msg, ms=1800){ if(!toast) return; toast.textContent=msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), ms); }
-
-  // Soft protection
   const block = e => e.preventDefault();
   document.addEventListener('contextmenu', block, {capture:true});
   document.addEventListener('dragstart', block, {capture:true});
   function keyHandler(e){
     const k = e.key?.toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && (k === 's' || k === 'p')) {
-      e.preventDefault(); e.stopPropagation();
-      showToast(k === 's' ? 'Saving disabled for previews' : 'Printing disabled for previews');
-    }
+    if ((e.ctrlKey || e.metaKey) && (k === 's' || k === 'p')) { e.preventDefault(); e.stopPropagation(); showToast(k==='s'?'Saving disabled for previews':'Printing disabled for previews'); }
   }
   window.addEventListener('keydown', keyHandler, true);
   document.addEventListener('keydown', keyHandler, true);
   document.body.addEventListener('keydown', keyHandler, true);
   window.addEventListener('beforeprint', () => {
-    const vimg = document.getElementById('viewer-img');
-    if (vimg) vimg.src = '';
+    const vimg = document.getElementById('viewer-img'); if (vimg) vimg.src = '';
   });
 
   // --- load assets list ---
@@ -68,84 +68,94 @@
     if (Array.isArray(res)) { list=res; ASSETS_PATH=path; break; }
   }
   if (!Array.isArray(list)) {
-    grid.innerHTML = `<p style="color:#b00">Cannot load assets. Check repo settings or try again later.</p>`;
+    grid.innerHTML = `<p style="color:#b00">Cannot load assets. Check repo settings or try later.</p>`;
+    dbg('No list from GitHub API.');
+    return;
+  }
+  dbg('<h3>Assets path:</h3>', ASSETS_PATH);
+  dbg('<h3>Files found:</h3>', list.length);
+
+  // --- group by slug ---
+  const groupsMap = {};
+  const parseLog = [];
+  for (const f of list) {
+    const name = f.name;
+    const m = name.match(TYPE_RE);
+    if (!m) {
+      parseLog.push({file:name, matched:false});
+      continue;
+    }
+    const type = m[1].toLowerCase(); // thumb/full/pack/ai/...
+    let slug = name.replace(TYPE_RE, '');
+    slug = slug.replace(/[ _.-]+$/,'').trim(); // clean trailing separators/spaces/dots
+    groupsMap[slug] ??= { slug, files: {}, meta: null };
+    groupsMap[slug].files[type] = f.download_url || f.html_url;
+    parseLog.push({file:name, matched:true, slug, type});
+  }
+  if (isDebug) {
+    dbg('<h3>Parse results (first 50):</h3>');
+    dbg(parseLog.slice(0,50));
+  }
+
+  let allItems = Object.values(groupsMap).filter(g => g.files.thumb && g.files.full);
+  // load meta
+  for (const g of allItems) {
+    const metaURL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${ASSETS_PATH}/${g.slug}.meta.json`;
+    const meta = await fetchJSON(metaURL);
+    g.meta  = meta || {};
+    g.title = (meta && meta.title) || titleCase(g.slug);
+    g.desc  = (meta && meta.description) || 'Production-ready seamless print with balanced scale and refined color.';
+    g.tags  = (meta && Array.isArray(meta.tags)) ? meta.tags.map(s=>s.toLowerCase()) : [];
+
+    let category = (meta && meta.category ? String(meta.category).trim() : '');
+    if (!category && meta && Array.isArray(meta.categories) && meta.categories.length) {
+      category = String(meta.categories[0]).trim();
+    }
+    if (!category) category = 'Uncategorized';
+    g.category = category;
+    if (isDebug) dbg(`meta for ${g.slug}:`, {title:g.title, category:g.category});
+  }
+
+  // if nothing to show, explain
+  if (!allItems.length) {
+    grid.innerHTML = `<p>No works found. Check naming: use <code>slug-thumb.jpg|png</code> and <code>slug-full.jpg|png</code>. Underscore/space before suffix is allowed.</p>`;
+    if (isDebug) {
+      const noPairs = parseLog.filter(x=>x.matched).map(x=>x.slug);
+      dbg('<h3>Matched but may be missing pair:</h3>', noPairs);
+    }
     return;
   }
 
-  // Group by slug (collect files)
-  const groupsMap = {};
-  for (const f of list) {
-    const m = f.name.match(TYPE_RE);
-    if (!m) continue;
-    const slug = f.name.replace(TYPE_RE, '');
-    const type = m[1].toLowerCase();
-    groupsMap[slug] ??= { slug, files: {}, meta: null };
-    groupsMap[slug].files[type] = f.download_url || f.html_url;
-  }
-  const allItems = Object.values(groupsMap).filter(g => g.files.thumb && g.files.full);
-
-  // Load meta & derive category
-  for (const g of allItems) {
-    const metaURL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${ASSETS_PATH}/${g.slug}.meta.json`;
-    g.meta = await fetchJSON(metaURL) || {};
-    g.title = g.meta.title || titleCase(g.slug);
-    g.desc  = g.meta.description || 'Production-ready seamless print with balanced scale and refined color.';
-    g.tags  = Array.isArray(g.meta.tags) ? g.meta.tags.map(s=>s.toLowerCase()) : [];
-
-    // Category priority: meta.category > meta.categories[0] > fallback
-    let category = (g.meta.category || '').toString().trim();
-    if (!category && Array.isArray(g.meta.categories) && g.meta.categories.length) {
-      category = (g.meta.categories[0] || '').toString().trim();
-    }
-    if (!category) {
-      // Fallback (เดาแบบอ่อน) เพื่อให้ของเก่ายังแสดงและกรองได้
-      const title = g.title.toLowerCase();
-      const t = new Set(g.tags);
-      const matchAny = arr => arr.some(k => t.has(k) || title.includes(k));
-      if (matchAny(['floral','botanical','flower','leaf','foliage'])) category = 'Floral';
-      else if (matchAny(['geo','geometric','pattern','stripe','check','dot'])) category = 'Geometric';
-      else if (matchAny(['animal','leopard','tiger','zebra','bird','butterfly'])) category = 'Animal';
-      else if (matchAny(['nature','forest','mountain','ocean','stone','wood'])) category = 'Nature';
-      else if (matchAny(['textile','fabric','weave','ikat','batik','paisley'])) category = 'Textile';
-      else if (matchAny(['abstract','texture','brush','paint'])) category = 'Abstract';
-      else category = 'Uncategorized';
-    }
-    g.category = category;
-  }
-
-  // Build category list from data
+  // categories from data
   const categoriesSet = new Set(allItems.map(i => i.category));
   const categories = Array.from(categoriesSet).sort((a,b)=>a.localeCompare(b));
   let currentCategory = qs.get('cat') || 'All';
   if (currentCategory !== 'All' && !categoriesSet.has(currentCategory)) currentCategory = 'All';
 
-  // Render filter chips
+  // render filter chips
   if (filters) {
-    const chips = [];
+    filters.innerHTML = '';
+    const label = Object.assign(document.createElement('span'), {className:'label', textContent:'Category:'});
+    filters.appendChild(label);
     const addChip = (name) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'filter-chip' + (name===currentCategory ? ' active':'');
+      btn.className = 'filter-chip' + (name===currentCategory?' active':'');
       btn.textContent = name;
       btn.addEventListener('click', () => {
         currentCategory = name;
         qs.set('cat', name==='All' ? '' : name);
-        qs.set('page','1'); // reset page
+        qs.set('page','1');
         history.replaceState({}, '', location.pathname + '?' + qs.toString());
         render();
       });
       filters.appendChild(btn);
     };
-    filters.innerHTML = '';
-    const label = document.createElement('span');
-    label.className = 'label';
-    label.textContent = 'Category:';
-    filters.appendChild(label);
     addChip('All');
     for (const c of categories) addChip(c);
   }
 
-  // Viewer
+  // viewer
   const viewer = document.getElementById('viewer');
   const viewerImg = document.getElementById('viewer-img');
   const viewerClose = document.getElementById('viewer-close');
@@ -157,17 +167,11 @@
   viewerClose.addEventListener('click', closeViewer);
   window.addEventListener('keydown', e => { if (e.key === 'Escape') closeViewer(); }, true);
 
-  // Render with pagination
+  // render (with pagination)
   function render(){
-    // filter
-    const filtered = currentCategory==='All'
-      ? allItems
-      : allItems.filter(i => i.category === currentCategory);
-
-    // sort newest-first by slug
+    const filtered = currentCategory==='All' ? allItems : allItems.filter(i => i.category === currentCategory);
     filtered.sort((a,b)=> a.slug < b.slug ? 1 : -1);
 
-    // pagination
     const total = filtered.length;
     const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
     let page = parseInt(qs.get('page') || '1', 10);
@@ -179,7 +183,6 @@
     const start = (page-1)*PAGE_SIZE;
     const items = filtered.slice(start, start + PAGE_SIZE);
 
-    // grid
     grid.innerHTML = '';
     for (const g of items) {
       const downloads = [];
@@ -212,25 +215,19 @@
       grid.appendChild(card);
     }
 
-    if (!items.length) {
-      grid.innerHTML = `<p>No works found.</p>`;
-    }
+    if (!items.length) grid.innerHTML = `<p>No works found under this category.</p>`;
 
     // pager
     if (pager) {
       pager.innerHTML = '';
       const makeBtn = (label, disabled, onClick, isActive=false) => {
-        const b = document.createElement('button');
-        b.type='button'; b.className='btn' + (isActive?' active':'');
-        b.textContent = label;
-        if (disabled) b.disabled = true;
-        b.addEventListener('click', onClick);
-        return b;
+        const b = document.createElement('button'); b.type='button'; b.className='btn' + (isActive?' active':'');
+        b.textContent = label; if (disabled) b.disabled = true; b.addEventListener('click', onClick); return b;
       };
       const prev = makeBtn('Prev', page<=1, () => { qs.set('page', String(page-1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); });
       pager.appendChild(prev);
 
-      const windowSize = 5; // show up to 5 page buttons
+      const windowSize = 5;
       let startP = Math.max(1, page - Math.floor(windowSize/2));
       let endP = Math.min(totalPages, startP + windowSize - 1);
       startP = Math.max(1, endP - windowSize + 1);
