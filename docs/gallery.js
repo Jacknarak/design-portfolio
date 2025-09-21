@@ -1,4 +1,4 @@
-// gallery.js — robust parsing (+ space/_/-), categories from meta, pagination, lightbox, debug
+// gallery.js — ใช้พาธ relative ไปยัง assets/, categories จาก meta, pagination, lightbox, debug
 (async () => {
   const grid    = document.getElementById('grid');
   const filters = document.getElementById('filters');
@@ -21,17 +21,21 @@
   candidatePaths.push('docs/assets','assets');
 
   // --- utils ---
-  // allow '-', '_' or space before type; support more extensions; case-insensitive
   const TYPE_RE = /[ _-](thumb|full|pack|ai|eps|psd|svg|png|jpg|jpeg|pdf|zip|webp)\.(ai|eps|psd|svg|png|jpg|jpeg|pdf|zip|webp)$/i;
   const LABELS  = { pack:'Pack', ai:'AI', eps:'EPS', psd:'PSD', svg:'SVG', png:'PNG', jpg:'JPG', jpeg:'JPG', pdf:'PDF', zip:'ZIP', webp:'WEBP' };
   const titleCase = s => s.replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim().replace(/\w\S*/g, t => t[0].toUpperCase()+t.slice(1));
 
   function dbg(...args){
-    if (isDebug) {
-      if (dbgBox && dbgBox.hasAttribute('hidden')) dbgBox.removeAttribute('hidden');
-      if (dbgBox) dbgBox.innerHTML += `<div>${args.map(a => typeof a==='string'?a:JSON.stringify(a)).join(' ')}</div>`;
-      console.log('[DEBUG]', ...args);
-    }
+    if (!isDebug) return;
+    if (dbgBox && dbgBox.hasAttribute('hidden')) dbgBox.removeAttribute('hidden');
+    const line = args.map(a => typeof a==='string'?a:JSON.stringify(a)).join(' ');
+    if (dbgBox) dbgBox.innerHTML += `<div>${line}</div>`;
+    console.log('[DEBUG]', ...args);
+  }
+  function dbgLink(label, href){
+    if (!isDebug) return;
+    if (dbgBox && dbgBox.hasAttribute('hidden')) dbgBox.removeAttribute('hidden');
+    if (dbgBox) dbgBox.innerHTML += `<div><a href="${href}" target="_blank" rel="noopener">${label}</a></div>`;
   }
 
   async function fetchJSON(url) {
@@ -42,7 +46,7 @@
     } catch { return null; }
   }
 
-  // Soft protection
+  // ป้องกันพื้นฐาน
   const toast = document.getElementById('toast');
   function showToast(msg, ms=1800){ if(!toast) return; toast.textContent=msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), ms); }
   const block = e => e.preventDefault();
@@ -59,7 +63,7 @@
     const vimg = document.getElementById('viewer-img'); if (vimg) vimg.src = '';
   });
 
-  // --- load assets list ---
+  // --- โหลดรายการไฟล์จาก GitHub API ---
   let list=null, ASSETS_PATH=null;
   for (const p of candidatePaths) {
     const path = p.replace(/^\/+|\/+$/g,'');
@@ -72,33 +76,35 @@
     dbg('No list from GitHub API.');
     return;
   }
-  dbg('<h3>Assets path:</h3>', ASSETS_PATH);
+  const SITE_ASSETS_PATH = ASSETS_PATH.replace(/^docs\//,''); // 'docs/assets' -> 'assets'
+  dbg('<h3>Assets path (repo):</h3>', ASSETS_PATH);
+  dbg('<h3>Assets path (site/relative):</h3>', SITE_ASSETS_PATH);
   dbg('<h3>Files found:</h3>', list.length);
 
-  // --- group by slug ---
+  // --- จับคู่เป็นกลุ่มตาม slug และเก็บ "ชื่อไฟล์จริง" ---
   const groupsMap = {};
   const parseLog = [];
   for (const f of list) {
-    const name = f.name;
+    const name = f.name;                  // เช่น darkbloom_moss-thumb.jpg
     const m = name.match(TYPE_RE);
-    if (!m) {
-      parseLog.push({file:name, matched:false});
-      continue;
-    }
-    const type = m[1].toLowerCase(); // thumb/full/pack/ai/...
+    if (!m) { parseLog.push({file:name, matched:false}); continue; }
+    const type = m[1].toLowerCase();      // thumb/full/ai/png...
     let slug = name.replace(TYPE_RE, '');
-    slug = slug.replace(/[ _.-]+$/,'').trim(); // clean trailing separators/spaces/dots
+    slug = slug.replace(/[ _.-]+$/,'').trim();
     groupsMap[slug] ??= { slug, files: {}, meta: null };
-    groupsMap[slug].files[type] = f.download_url || f.html_url;
+    groupsMap[slug].files[type] = { name, raw: f.download_url || f.html_url };
     parseLog.push({file:name, matched:true, slug, type});
   }
-  if (isDebug) {
-    dbg('<h3>Parse results (first 50):</h3>');
+  if (!Object.keys(groupsMap).length) {
+    grid.innerHTML = `<p>No works parsed. Check file naming.</p>`;
     dbg(parseLog.slice(0,50));
+    return;
   }
 
+  // เอาเฉพาะงานที่มีคู่ thumb+full
   let allItems = Object.values(groupsMap).filter(g => g.files.thumb && g.files.full);
-  // load meta
+
+  // โหลด meta และคำนวณหมวด + สร้าง URL แบบ relative
   for (const g of allItems) {
     const metaURL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${ASSETS_PATH}/${g.slug}.meta.json`;
     const meta = await fetchJSON(metaURL);
@@ -106,33 +112,36 @@
     g.title = (meta && meta.title) || titleCase(g.slug);
     g.desc  = (meta && meta.description) || 'Production-ready seamless print with balanced scale and refined color.';
     g.tags  = (meta && Array.isArray(meta.tags)) ? meta.tags.map(s=>s.toLowerCase()) : [];
-
     let category = (meta && meta.category ? String(meta.category).trim() : '');
-    if (!category && meta && Array.isArray(meta.categories) && meta.categories.length) {
-      category = String(meta.categories[0]).trim();
-    }
+    if (!category && meta && Array.isArray(meta.categories) && meta.categories.length) category = String(meta.categories[0]).trim();
     if (!category) category = 'Uncategorized';
     g.category = category;
-    if (isDebug) dbg(`meta for ${g.slug}:`, {title:g.title, category:g.category});
+
+    // พาธ relative (ไม่ใส่ / นำหน้า) -> จะกลายเป็น /design-portfolio/assets/<ไฟล์>
+    const thumbName = g.files.thumb.name;
+    const fullName  = g.files.full.name;
+    g.thumbUrl = `${SITE_ASSETS_PATH}/${thumbName}`;
+    g.fullUrl  = `${SITE_ASSETS_PATH}/${fullName}`;
+
+    if (isDebug) {
+      dbg(`meta for ${g.slug}:`, {title:g.title, category:g.category});
+      dbgLink(`thumb: ${g.thumbUrl}`, g.thumbUrl);
+      dbgLink(`full:  ${g.fullUrl}`,  g.fullUrl);
+    }
   }
 
-  // if nothing to show, explain
   if (!allItems.length) {
-    grid.innerHTML = `<p>No works found. Check naming: use <code>slug-thumb.jpg|png</code> and <code>slug-full.jpg|png</code>. Underscore/space before suffix is allowed.</p>`;
-    if (isDebug) {
-      const noPairs = parseLog.filter(x=>x.matched).map(x=>x.slug);
-      dbg('<h3>Matched but may be missing pair:</h3>', noPairs);
-    }
+    grid.innerHTML = `<p>No works found. Ensure pairs like <code>slug-thumb.jpg/png</code> and <code>slug-full.jpg/png</code>.</p>`;
     return;
   }
 
-  // categories from data
+  // หมวดจากข้อมูลจริง
   const categoriesSet = new Set(allItems.map(i => i.category));
   const categories = Array.from(categoriesSet).sort((a,b)=>a.localeCompare(b));
   let currentCategory = qs.get('cat') || 'All';
   if (currentCategory !== 'All' && !categoriesSet.has(currentCategory)) currentCategory = 'All';
 
-  // render filter chips
+  // สร้างปุ่มหมวด
   if (filters) {
     filters.innerHTML = '';
     const label = Object.assign(document.createElement('span'), {className:'label', textContent:'Category:'});
@@ -167,7 +176,9 @@
   viewerClose.addEventListener('click', closeViewer);
   window.addEventListener('keydown', e => { if (e.key === 'Escape') closeViewer(); }, true);
 
-  // render (with pagination)
+  // render + pagination
+  function fileUrl(rec){ return `${SITE_ASSETS_PATH}/${rec.name}`; }
+
   function render(){
     const filtered = currentCategory==='All' ? allItems : allItems.filter(i => i.category === currentCategory);
     filtered.sort((a,b)=> a.slug < b.slug ? 1 : -1);
@@ -188,7 +199,7 @@
       const downloads = [];
       if (SHOW_DOWNLOADS) {
         for (const key of Object.keys(LABELS)) {
-          if (g.files[key]) downloads.push(`<li><a href="${g.files[key]}" download>${LABELS[key]}</a></li>`);
+          if (g.files[key]) downloads.push(`<li><a href="${fileUrl(g.files[key])}" download>${LABELS[key]}</a></li>`);
         }
       } else {
         downloads.push(`<li><a href="mailto:inkchaniai@gmail.com?subject=Licensing%20request:%20${encodeURIComponent(g.title)}">Request license</a></li>`);
@@ -198,7 +209,7 @@
       const html = `
         <article class="card">
           <figure class="thumb">
-            <img src="${g.files.thumb}" alt="${g.title}" draggable="false"/>
+            <img src="${g.thumbUrl}" alt="${g.title}" draggable="false" referrerpolicy="no-referrer"/>
             <div class="wm">${WM_TEXT}</div>
           </figure>
           <div class="card-body">
@@ -211,7 +222,7 @@
       const tpl = document.createElement('template');
       tpl.innerHTML = html.trim();
       const card = tpl.content.firstElementChild;
-      card.querySelector('.thumb').addEventListener('click', () => openViewer(g.files.full));
+      card.querySelector('.thumb').addEventListener('click', () => openViewer(g.fullUrl));
       grid.appendChild(card);
     }
 
@@ -224,21 +235,28 @@
         const b = document.createElement('button'); b.type='button'; b.className='btn' + (isActive?' active':'');
         b.textContent = label; if (disabled) b.disabled = true; b.addEventListener('click', onClick); return b;
       };
+      const totalPagesLocal = Math.max(1, Math.ceil(total / PAGE_SIZE));
       const prev = makeBtn('Prev', page<=1, () => { qs.set('page', String(page-1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); });
       pager.appendChild(prev);
 
       const windowSize = 5;
       let startP = Math.max(1, page - Math.floor(windowSize/2));
-      let endP = Math.min(totalPages, startP + windowSize - 1);
+      let endP = Math.min(totalPagesLocal, startP + windowSize - 1);
       startP = Math.max(1, endP - windowSize + 1);
 
       for (let p = startP; p <= endP; p++) {
         pager.appendChild(makeBtn(String(p), false, () => { qs.set('page', String(p)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); }, p===page));
       }
-      const next = makeBtn('Next', page>=totalPages, () => { qs.set('page', String(page+1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); });
+      const next = makeBtn('Next', page>=totalPagesLocal, () => { qs.set('page', String(page+1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); });
       pager.appendChild(next);
     }
   }
 
   render();
+
+  // โชว์พาธ/ลิงก์สำหรับตรวจใน debug
+  if (isDebug) {
+    dbg('<h3>Parse sample (first 50):</h3>');
+    dbg(parseLog.slice(0,50));
+  }
 })();
