@@ -62,6 +62,10 @@ h2{font-size:22px;margin:28px 0 14px}
   opacity:0;pointer-events:none;transition:opacity .25s ease;z-index:1100;max-width:90vw;text-align:center}
 .toast.show{opacity:1}
 
+/* Debug panel */
+.debug-panel{margin:14px 0;padding:12px;border:1px dashed #bbb;background:#fff;color:#333;border-radius:10px;font-size:13px;line-height:1.4}
+.debug-panel h3{margin:0 0 8px;font-size:14px}
+
 /* Footer */
 .site-footer{margin-top:40px;padding:22px 0;border-top:1px solid #ececec;background:#f7f7f7;color:#555}
 
