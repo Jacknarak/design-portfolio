@@ -1,4 +1,4 @@
-// gallery.js — ใช้พาธ relative ไปยัง assets/, categories จาก meta, pagination, lightbox, debug
+// gallery.js v26 — site-path first, fallback to raw on error; categories from meta; pagination; debug
 (async () => {
   const grid    = document.getElementById('grid');
   const filters = document.getElementById('filters');
@@ -32,7 +32,7 @@
     if (dbgBox) dbgBox.innerHTML += `<div>${line}</div>`;
     console.log('[DEBUG]', ...args);
   }
-  function dbgLink(label, href){
+  function linkDbg(label, href){
     if (!isDebug) return;
     if (dbgBox && dbgBox.hasAttribute('hidden')) dbgBox.removeAttribute('hidden');
     if (dbgBox) dbgBox.innerHTML += `<div><a href="${href}" target="_blank" rel="noopener">${label}</a></div>`;
@@ -46,7 +46,7 @@
     } catch { return null; }
   }
 
-  // ป้องกันพื้นฐาน
+  // basic protection (unchanged)
   const toast = document.getElementById('toast');
   function showToast(msg, ms=1800){ if(!toast) return; toast.textContent=msg; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'), ms); }
   const block = e => e.preventDefault();
@@ -63,7 +63,7 @@
     const vimg = document.getElementById('viewer-img'); if (vimg) vimg.src = '';
   });
 
-  // --- โหลดรายการไฟล์จาก GitHub API ---
+  // --- load list from GitHub API (source of truth) ---
   let list=null, ASSETS_PATH=null;
   for (const p of candidatePaths) {
     const path = p.replace(/^\/+|\/+$/g,'');
@@ -78,33 +78,33 @@
   }
   const SITE_ASSETS_PATH = ASSETS_PATH.replace(/^docs\//,''); // 'docs/assets' -> 'assets'
   dbg('<h3>Assets path (repo):</h3>', ASSETS_PATH);
-  dbg('<h3>Assets path (site/relative):</h3>', SITE_ASSETS_PATH);
+  dbg('<h3>Assets path (site):</h3>', SITE_ASSETS_PATH);
   dbg('<h3>Files found:</h3>', list.length);
 
-  // --- จับคู่เป็นกลุ่มตาม slug และเก็บ "ชื่อไฟล์จริง" ---
+  // --- group by slug + keep actual filenames ---
   const groupsMap = {};
   const parseLog = [];
   for (const f of list) {
-    const name = f.name;                  // เช่น darkbloom_moss-thumb.jpg
+    const name = f.name;
     const m = name.match(TYPE_RE);
     if (!m) { parseLog.push({file:name, matched:false}); continue; }
-    const type = m[1].toLowerCase();      // thumb/full/ai/png...
-    let slug = name.replace(TYPE_RE, '');
-    slug = slug.replace(/[ _.-]+$/,'').trim();
+    const type = m[1].toLowerCase(); // thumb/full/ai/...
+    let slug = name.replace(TYPE_RE, '').replace(/[ _.-]+$/,'').trim();
     groupsMap[slug] ??= { slug, files: {}, meta: null };
-    groupsMap[slug].files[type] = { name, raw: f.download_url || f.html_url };
+    groupsMap[slug].files[type] = {
+      name,
+      raw: f.download_url || f.html_url // fallback raw url
+    };
     parseLog.push({file:name, matched:true, slug, type});
   }
-  if (!Object.keys(groupsMap).length) {
-    grid.innerHTML = `<p>No works parsed. Check file naming.</p>`;
+  let allItems = Object.values(groupsMap).filter(g => g.files.thumb && g.files.full);
+  if (!allItems.length) {
+    grid.innerHTML = `<p>No works parsed. Check naming: <code>&lt;slug&gt;-thumb.png/jpg</code> + <code>&lt;slug&gt;-full.png/jpg</code>.</p>`;
     dbg(parseLog.slice(0,50));
     return;
   }
 
-  // เอาเฉพาะงานที่มีคู่ thumb+full
-  let allItems = Object.values(groupsMap).filter(g => g.files.thumb && g.files.full);
-
-  // โหลด meta และคำนวณหมวด + สร้าง URL แบบ relative
+  // --- load meta + build both site/raw URLs ---
   for (const g of allItems) {
     const metaURL = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${ASSETS_PATH}/${g.slug}.meta.json`;
     const meta = await fetchJSON(metaURL);
@@ -117,31 +117,30 @@
     if (!category) category = 'Uncategorized';
     g.category = category;
 
-    // พาธ relative (ไม่ใส่ / นำหน้า) -> จะกลายเป็น /design-portfolio/assets/<ไฟล์>
     const thumbName = g.files.thumb.name;
     const fullName  = g.files.full.name;
-    g.thumbUrl = `${SITE_ASSETS_PATH}/${thumbName}`;
-    g.fullUrl  = `${SITE_ASSETS_PATH}/${fullName}`;
+
+    // site path (ต้องรอ deploy): /design-portfolio/assets/<file>
+    g.thumbSite = `${SITE_ASSETS_PATH}/${thumbName}`;
+    g.fullSite  = `${SITE_ASSETS_PATH}/${fullName}`;
+
+    // raw fallback (เห็นได้ทันทีหลัง commit)
+    g.thumbRaw  = g.files.thumb.raw;
+    g.fullRaw   = g.files.full.raw;
 
     if (isDebug) {
       dbg(`meta for ${g.slug}:`, {title:g.title, category:g.category});
-      dbgLink(`thumb: ${g.thumbUrl}`, g.thumbUrl);
-      dbgLink(`full:  ${g.fullUrl}`,  g.fullUrl);
+      linkDbg(`thumb (site) → ${g.thumbSite}`, g.thumbSite);
+      linkDbg(`thumb (raw)  → ${g.thumbRaw}`,  g.thumbRaw);
     }
   }
 
-  if (!allItems.length) {
-    grid.innerHTML = `<p>No works found. Ensure pairs like <code>slug-thumb.jpg/png</code> and <code>slug-full.jpg/png</code>.</p>`;
-    return;
-  }
-
-  // หมวดจากข้อมูลจริง
+  // --- categories ---
   const categoriesSet = new Set(allItems.map(i => i.category));
   const categories = Array.from(categoriesSet).sort((a,b)=>a.localeCompare(b));
   let currentCategory = qs.get('cat') || 'All';
   if (currentCategory !== 'All' && !categoriesSet.has(currentCategory)) currentCategory = 'All';
 
-  // สร้างปุ่มหมวด
   if (filters) {
     filters.innerHTML = '';
     const label = Object.assign(document.createElement('span'), {className:'label', textContent:'Category:'});
@@ -164,19 +163,23 @@
     for (const c of categories) addChip(c);
   }
 
-  // viewer
+  // --- viewer helper (with fallback) ---
   const viewer = document.getElementById('viewer');
   const viewerImg = document.getElementById('viewer-img');
   const viewerClose = document.getElementById('viewer-close');
   const viewerWM = viewer.querySelector('.wm-large');
   viewerWM.textContent = WM_TEXT;
-  function openViewer(src){ viewerImg.src = src; viewer.classList.add('show'); viewer.setAttribute('aria-hidden','false'); }
-  function closeViewer(){ viewer.classList.remove('show'); viewer.setAttribute('aria-hidden','true'); viewerImg.src=''; }
+  function openViewer(siteSrc, rawSrc){
+    viewerImg.src = siteSrc;
+    viewerImg.onerror = () => { if (viewerImg.dataset.retry!=='1'){ viewerImg.dataset.retry='1'; viewerImg.src = rawSrc; } };
+    viewer.classList.add('show'); viewer.setAttribute('aria-hidden','false');
+  }
+  function closeViewer(){ viewer.classList.remove('show'); viewer.setAttribute('aria-hidden','true'); viewerImg.src=''; viewerImg.dataset.retry=''; viewerImg.onerror=null; }
   viewer.addEventListener('click', e => { if (e.target === viewer) closeViewer(); });
   viewerClose.addEventListener('click', closeViewer);
   window.addEventListener('keydown', e => { if (e.key === 'Escape') closeViewer(); }, true);
 
-  // render + pagination
+  // --- render + pagination (thumb uses fallback too) ---
   function fileUrl(rec){ return `${SITE_ASSETS_PATH}/${rec.name}`; }
 
   function render(){
@@ -209,7 +212,7 @@
       const html = `
         <article class="card">
           <figure class="thumb">
-            <img src="${g.thumbUrl}" alt="${g.title}" draggable="false" referrerpolicy="no-referrer"/>
+            <img class="thumb-img" alt="${g.title}" draggable="false" referrerpolicy="no-referrer"/>
             <div class="wm">${WM_TEXT}</div>
           </figure>
           <div class="card-body">
@@ -222,7 +225,12 @@
       const tpl = document.createElement('template');
       tpl.innerHTML = html.trim();
       const card = tpl.content.firstElementChild;
-      card.querySelector('.thumb').addEventListener('click', () => openViewer(g.fullUrl));
+
+      const img = card.querySelector('.thumb-img');
+      img.src = g.thumbSite;
+      img.onerror = () => { if (img.dataset.retry!=='1'){ img.dataset.retry='1'; img.src = g.thumbRaw; } };
+
+      card.querySelector('.thumb').addEventListener('click', () => openViewer(g.fullSite, g.fullRaw));
       grid.appendChild(card);
     }
 
@@ -235,26 +243,21 @@
         const b = document.createElement('button'); b.type='button'; b.className='btn' + (isActive?' active':'');
         b.textContent = label; if (disabled) b.disabled = true; b.addEventListener('click', onClick); return b;
       };
-      const totalPagesLocal = Math.max(1, Math.ceil(total / PAGE_SIZE));
-      const prev = makeBtn('Prev', page<=1, () => { qs.set('page', String(page-1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); });
-      pager.appendChild(prev);
-
       const windowSize = 5;
       let startP = Math.max(1, page - Math.floor(windowSize/2));
-      let endP = Math.min(totalPagesLocal, startP + windowSize - 1);
+      let endP = Math.min(totalPages, startP + windowSize - 1);
       startP = Math.max(1, endP - windowSize + 1);
 
+      pager.appendChild(makeBtn('Prev', page<=1, () => { qs.set('page', String(page-1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); }));
       for (let p = startP; p <= endP; p++) {
         pager.appendChild(makeBtn(String(p), false, () => { qs.set('page', String(p)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); }, p===page));
       }
-      const next = makeBtn('Next', page>=totalPagesLocal, () => { qs.set('page', String(page+1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); });
-      pager.appendChild(next);
+      pager.appendChild(makeBtn('Next', page>=totalPages, () => { qs.set('page', String(page+1)); history.replaceState({}, '', location.pathname + '?' + qs.toString()); render(); }));
     }
   }
 
   render();
 
-  // โชว์พาธ/ลิงก์สำหรับตรวจใน debug
   if (isDebug) {
     dbg('<h3>Parse sample (first 50):</h3>');
     dbg(parseLog.slice(0,50));
